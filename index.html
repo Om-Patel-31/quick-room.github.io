@@ -93,7 +93,10 @@
             <div style="display:flex;justify-content:space-between;align-items:center">
               <div>
                 <div class="muted">Room code</div>
-                <div class="code" id="roomCodeDisplay"></div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div class="code" id="roomCodeDisplay"></div>
+                  <div class="muted" id="participantCount">0</div>
+                </div>
               </div>
               <div>
                 <button id="leaveBtn" class="ghost">Leave</button>
@@ -111,6 +114,7 @@
                 </div>
                 <button id="pingBtn" class="cta">Ping</button>
                 <button id="pingAllQuick" class="ghost">Ping Everyone</button>
+                <button id="callBtn" class="ghost">Call</button>
               </div>
 
               <div>
@@ -156,6 +160,7 @@
     </div>
 
     <div id="toastArea"></div>
+    <div id="audioContainer" style="display:none"></div>
 
     <footer class="muted">Made for quick coordination — no backend. Use share link to invite others.</footer>
   </div>
@@ -167,14 +172,26 @@
     const beep = () => { const o=new Audio(); o.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA='; o.play().catch(()=>{}); }
 
     // State
-    let my = {id: null, name: null, code: null, mic: false}
+    let my = {id: null, name: null, code: null, mic: false, ts: null}
+    let presenceInterval = null
     const channel = new BroadcastChannel('quickroom')
+
+    // WebRTC state (simple mesh for small groups)
+    const peerConnections = {} // remoteId -> RTCPeerConnection
+    let localStream = null
+    let inCall = false
 
     function saveRoomParticipants(code, list){ localStorage.setItem('qr:room:'+code, JSON.stringify(list)) }
     function loadRoomParticipants(code){ try { return JSON.parse(localStorage.getItem('qr:room:'+code) || '[]') } catch(e){return []} }
 
+    // Remove participants with stale timestamps (offline)
+    function pruneStale(list, maxAgeMs = 25000){ const now = Date.now(); return list.filter(p=> p && (p.ts && (now - p.ts) < maxAgeMs)) }
+
     function renderParticipants(){
-      const list = loadRoomParticipants(my.code)
+      let list = loadRoomParticipants(my.code)
+      // prune stale and persist the pruned list
+      list = pruneStale(list)
+      saveRoomParticipants(my.code, list)
       const container = $('participantsList')
       container.innerHTML = ''
       list.forEach(p=>{
@@ -182,6 +199,9 @@
         el.innerHTML = `<div class="avatar">${(p.name||'?').slice(0,2).toUpperCase()}</div><div style="flex:1"><div style="font-weight:600">${escapeHtml(p.name||'Anonymous')}</div><div class="muted">${p.id===my.id? 'You' : 'Online' } • ${p.mic? 'Mic on':'Mic off'}</div></div>`
         container.appendChild(el)
       })
+      // update participant count display
+      const countEl = $('participantCount')
+      if(countEl) countEl.textContent = String(list.length)
     }
 
     function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])) }
@@ -189,28 +209,45 @@
     function broadcast(msg){ channel.postMessage(msg) }
 
     // Join/leave
+    function startPresenceHeartbeat(){
+      // send an update every 5s with current timestamp
+      if(presenceInterval) clearInterval(presenceInterval)
+      presenceInterval = setInterval(()=>{
+        my.ts = Date.now()
+        const list = loadRoomParticipants(my.code).map(p=>p.id===my.id? {...p,ts:my.ts}:p)
+        saveRoomParticipants(my.code, list)
+        broadcast({type:'update', room:my.code, participant:{id:my.id,name:my.name,mic:my.mic,ts:my.ts}})
+      },5000)
+    }
+
+    function stopPresenceHeartbeat(){ if(presenceInterval){ clearInterval(presenceInterval); presenceInterval=null } }
+
     function joinRoom(code, name){
       my.code = code
       my.name = name || 'Anon'
       my.id = localStorage.getItem('qr:me:id') || crypto.randomUUID()
       localStorage.setItem('qr:me:id', my.id)
+      my.ts = Date.now()
+      // remove any existing record for this id and add fresh
       const list = loadRoomParticipants(code).filter(p=>p.id!==my.id)
-      list.push({id: my.id, name: my.name, mic: my.mic, ts: Date.now()})
+      list.push({id: my.id, name: my.name, mic: my.mic, ts: my.ts})
       saveRoomParticipants(code, list)
-      broadcast({type:'join', room:code, participant:{id:my.id,name:my.name,mic:my.mic}})
+      broadcast({type:'join', room:code, participant:{id:my.id,name:my.name,mic:my.mic,ts:my.ts}})
       $('generateView').style.display='none'
       $('roomView').style.display='block'
       $('roomCodeDisplay').textContent = code
       renderParticipants()
       pushStateParams()
+      startPresenceHeartbeat()
     }
 
     function leaveRoom(){
       if(!my.code) return
+      stopPresenceHeartbeat()
       const list = loadRoomParticipants(my.code).filter(p=>p.id!==my.id)
       saveRoomParticipants(my.code, list)
       broadcast({type:'leave', room:my.code, id:my.id})
-      my = {id:null,name:null,code:null,mic:false}
+      my = {id:null,name:null,code:null,mic:false,ts:null}
       $('generateView').style.display='block'
       $('roomView').style.display='none'
       history.replaceState({},'',location.pathname)
@@ -219,11 +256,18 @@
     // Messages
     channel.onmessage = ev => {
       const m = ev.data
-      if(!m || !m.room || m.room!==my.code) return
+      if(!m || !m.room) return
+      // ignore messages for other rooms unless we're viewing that room
+      if(m.room!==my.code) return
       if(m.type==='join' || m.type==='update'){
-        const list = loadRoomParticipants(my.code).filter(p=>p.id!==m.participant.id)
-        list.push(m.participant)
-        saveRoomParticipants(my.code, list)
+        const incoming = m.participant || {}
+        incoming.ts = incoming.ts || Date.now()
+        // merge/replace existing participant
+        const list = loadRoomParticipants(my.code).filter(p=>p.id!==incoming.id)
+        list.push(incoming)
+        // prune stale and persist
+        const pruned = pruneStale(list)
+        saveRoomParticipants(my.code, pruned)
         renderParticipants()
       } else if(m.type==='leave'){
         const list = loadRoomParticipants(my.code).filter(p=>p.id!==m.id)
@@ -234,6 +278,94 @@
           showToast((m.fromName||'Someone') + ' pinged you')
           beep()
         }
+      } else if(m.type && m.type.startsWith('webrtc-')){
+        // simple signaling via BroadcastChannel
+        const from = m.from
+        if(!from || from===my.id) return
+        // if message targets a specific peer and it's not for me, ignore
+        if(m.to && m.to!==my.id) return
+        handleSignalMessage(m)
+      }
+    }
+
+    async function ensureLocalStream(){
+      if(localStream) return localStream
+      try{
+        localStream = await navigator.mediaDevices.getUserMedia({audio:true})
+        return localStream
+      }catch(e){ showToast('Could not access microphone'); throw e }
+    }
+
+    function createAudioElementFor(remoteId){
+      const container = $('audioContainer')
+      let a = document.getElementById('audio-'+remoteId)
+      if(a) return a
+      a = document.createElement('audio'); a.id = 'audio-'+remoteId; a.autoplay = true; a.controls = false
+      container.appendChild(a)
+      return a
+    }
+
+    function createPeerConnection(remoteId){
+      if(peerConnections[remoteId]) return peerConnections[remoteId]
+      const pc = new RTCPeerConnection({iceServers:[{urls:['stun:stun.l.google.com:19302']} ]})
+      pc.onicecandidate = e=>{ if(e.candidate) broadcast({type:'webrtc-candidate',room:my.code,from:my.id,to:remoteId,candidate:e.candidate}) }
+      pc.ontrack = e=>{ const audio = createAudioElementFor(remoteId); audio.srcObject = e.streams[0] }
+      peerConnections[remoteId]=pc
+      return pc
+    }
+
+    async function startCall(){
+      if(!my.code){ showToast('Join a room first'); return }
+      if(inCall){ showToast('Already in call'); return }
+      await ensureLocalStream()
+      const others = loadRoomParticipants(my.code).filter(p=>p.id && p.id!==my.id)
+      for(const p of others){
+        const pc = createPeerConnection(p.id)
+        // add local tracks
+        localStream.getTracks().forEach(t=>pc.addTrack(t, localStream))
+        try{
+          const offer = await pc.createOffer()
+          await pc.setLocalDescription(offer)
+          broadcast({type:'webrtc-offer',room:my.code,from:my.id,to:p.id,sdp:pc.localDescription})
+        }catch(e){ console.error(e) }
+      }
+      inCall = true
+      $('callBtn').textContent = 'Hang Up'
+      showToast('Calling participants')
+    }
+
+    function stopCall(){
+      Object.values(peerConnections).forEach(pc=>{ try{ pc.close() }catch(e){} })
+      Object.keys(peerConnections).forEach(k=>delete peerConnections[k])
+      if(localStream){ localStream.getTracks().forEach(t=>t.stop()); localStream=null }
+      // remove remote audio elements
+      const container = $('audioContainer'); container.innerHTML=''
+      inCall=false
+      $('callBtn').textContent = 'Call'
+      showToast('Call ended')
+    }
+
+    async function handleSignalMessage(m){
+      const from = m.from
+      if(m.type==='webrtc-offer'){
+        // incoming offer: create pc, set remote, add local, answer
+        await ensureLocalStream()
+        const pc = createPeerConnection(from)
+        try{
+          await pc.setRemoteDescription(new RTCSessionDescription(m.sdp))
+        }catch(e){ console.error('setRemoteDesc',e) }
+        localStream.getTracks().forEach(t=>pc.addTrack(t, localStream))
+        const answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+        broadcast({type:'webrtc-answer',room:my.code,from:my.id,to:from,sdp:pc.localDescription})
+        inCall = true
+        $('callBtn').textContent = 'Hang Up'
+      } else if(m.type==='webrtc-answer'){
+        const pc = createPeerConnection(from)
+        try{ await pc.setRemoteDescription(new RTCSessionDescription(m.sdp)) }catch(e){ console.error('setRemoteDesc answer',e) }
+      } else if(m.type==='webrtc-candidate'){
+        const pc = createPeerConnection(from)
+        try{ await pc.addIceCandidate(m.candidate) }catch(e){ console.warn('ICE add failed',e) }
       }
     }
 
@@ -311,8 +443,9 @@
       btn.classList.toggle('off', !my.mic)
       btn.setAttribute('aria-pressed', String(!!my.mic))
       $('micLabel').textContent = my.mic? 'Mic On':'Mic Off'
-      broadcast({type:'update',room:my.code,participant:{id:my.id,name:my.name,mic:my.mic}})
-      const list = loadRoomParticipants(my.code).map(p=>p.id===my.id? {...p,mic:my.mic}:p)
+      my.ts = Date.now()
+      broadcast({type:'update',room:my.code,participant:{id:my.id,name:my.name,mic:my.mic,ts:my.ts}})
+      const list = loadRoomParticipants(my.code).map(p=>p.id===my.id? {...p,mic:my.mic,ts:my.ts}:p)
       saveRoomParticipants(my.code,list)
       renderParticipants()
     })
