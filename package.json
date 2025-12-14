@@ -1,0 +1,12 @@
+{
+  "name": "quickroom-signaling",
+  "version": "1.0.0",
+  "description": "Lightweight signaling server for QuickRoom demo",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.13.0"
+  }
+}
