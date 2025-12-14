@@ -478,6 +478,7 @@
     $('closePingBtn').addEventListener('click', closePingPanel)
     $('sendPingBtn').addEventListener('click', sendPing)
     $('pingAllQuick').addEventListener('click', ()=>{ if(!my.code){ showToast('Join a room first'); return } broadcast({type:'ping',room:my.code,targets:['everyone'],from:my.id,fromName:my.name||'Someone'}); showToast('Pinged everyone'); })
+    $('callBtn').addEventListener('click', ()=>{ if(!my.code){ showToast('Join a room first'); return } if(!inCall) startCall(); else stopCall() })
 
     // On load — auto-join if params present
     window.addEventListener('load', ()=>{
