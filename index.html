@@ -181,6 +181,11 @@
     let localStream = null
     let inCall = false
 
+    // Signaling (WebSocket) — will fall back to BroadcastChannel when unavailable
+    let ws = null
+    const wsUrl = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.hostname + ':3000'
+    let wsConnected = false
+
     function saveRoomParticipants(code, list){ localStorage.setItem('qr:room:'+code, JSON.stringify(list)) }
     function loadRoomParticipants(code){ try { return JSON.parse(localStorage.getItem('qr:room:'+code) || '[]') } catch(e){return []} }
 
@@ -206,7 +211,24 @@
 
     function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])) }
 
-    function broadcast(msg){ channel.postMessage(msg) }
+    function connectSignaling(){
+      if(ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
+      try{ ws = new WebSocket(wsUrl) }catch(e){ ws = null; return }
+      ws.onopen = ()=>{
+        wsConnected = true
+        if(my.code && my.id) ws.send(JSON.stringify({type:'announce',room:my.code,from:my.id}))
+      }
+      ws.onmessage = ev => { try{ const msg = JSON.parse(ev.data); processRemoteMessage(msg) }catch(e){} }
+      ws.onclose = ()=>{ wsConnected = false; ws = null }
+      ws.onerror = ()=>{ wsConnected = false }
+    }
+
+    function broadcast(msg){
+      try{
+        if(ws && ws.readyState === WebSocket.OPEN){ ws.send(JSON.stringify(msg)); return }
+      }catch(e){}
+      channel.postMessage(msg)
+    }
 
     // Join/leave
     function startPresenceHeartbeat(){
@@ -239,6 +261,7 @@
       renderParticipants()
       pushStateParams()
       startPresenceHeartbeat()
+      connectSignaling()
     }
 
     function leaveRoom(){
@@ -247,6 +270,7 @@
       const list = loadRoomParticipants(my.code).filter(p=>p.id!==my.id)
       saveRoomParticipants(my.code, list)
       broadcast({type:'leave', room:my.code, id:my.id})
+      try{ if(ws){ ws.close(); ws = null } }catch(e){}
       my = {id:null,name:null,code:null,mic:false,ts:null}
       $('generateView').style.display='block'
       $('roomView').style.display='none'
@@ -254,8 +278,7 @@
     }
 
     // Messages
-    channel.onmessage = ev => {
-      const m = ev.data
+    function processRemoteMessage(m){
       if(!m || !m.room) return
       // ignore messages for other rooms unless we're viewing that room
       if(m.room!==my.code) return
@@ -279,14 +302,14 @@
           beep()
         }
       } else if(m.type && m.type.startsWith('webrtc-')){
-        // simple signaling via BroadcastChannel
         const from = m.from
         if(!from || from===my.id) return
-        // if message targets a specific peer and it's not for me, ignore
         if(m.to && m.to!==my.id) return
         handleSignalMessage(m)
       }
     }
+
+    channel.onmessage = ev => { processRemoteMessage(ev.data) }
 
     async function ensureLocalStream(){
       if(localStream) return localStream
