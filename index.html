@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>QuickRoom — fast code & ping board</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+  <style>
+    :root{--bg:#071021;--panel:#0b1a2b;--accent:#00d4ff;--accent-2:#7c5cff;--muted:#98a4b3}
+    *{box-sizing:border-box;font-family:Inter,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#031026 0%,#071a2a 70%);color:#e6f3ff}
+    .wrap{max-width:980px;margin:28px auto;padding:20px}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+    h1{font-size:20px;margin:0;letter-spacing:0.4px}
+    .logo{display:flex;gap:10px;align-items:center}
+    .logo .mark{width:42px;height:42px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;font-weight:700;color:#031023}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);border:1px solid rgba(255,255,255,0.04);padding:18px;border-radius:12px}
+
+    .grid{display:grid;grid-template-columns:1fr 360px;gap:18px}
+    .big{padding:22px}
+    .controls{display:flex;gap:10px;margin-top:12px}
+    button.cta{background:var(--accent);color:#00131a;border:0;padding:12px 16px;border-radius:10px;font-weight:600;cursor:pointer}
+    button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:10px 12px;border-radius:10px;cursor:pointer}
+
+    .codebox{display:flex;gap:12px;align-items:center}
+    .code{font-family:monospace;font-size:28px;letter-spacing:6px;padding:8px 12px;border-radius:10px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03)}
+    input[type=text]{width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+
+    .side{padding:18px;height:100%}
+    .participants{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+    .participant{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;background:linear-gradient(90deg,rgba(255,255,255,0.01),transparent);border:1px solid rgba(255,255,255,0.02)}
+    .avatar{width:40px;height:40px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#60ffa8);display:flex;align-items:center;justify-content:center;font-weight:700;color:#021}
+    .muted{color:var(--muted);font-size:13px}
+
+    .board{display:flex;flex-direction:column;gap:12px;margin-top:14px}
+    .toggle{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:12px;background:#081827;border:1px solid rgba(255,255,255,0.02)}
+    .mic-btn{width:64px;height:64px;border-radius:999px;border:0;display:inline-flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--accent-2),var(--accent));color:#021;font-size:22px;box-shadow:0 6px 18px rgba(0,0,0,0.5);cursor:pointer}
+    .mic-btn.off{background:linear-gradient(180deg,#0b2030,#072033);color:var(--muted);border:1px solid rgba(255,255,255,0.04)}
+    .mic-btn i{font-size:22px}
+    .mic-label{font-weight:600;margin-left:8px}
+
+    .sidebar-panel{position:fixed;right:18px;top:80px;width:320px;background:var(--panel);padding:14px;border-radius:12px;border:1px solid rgba(255,255,255,0.04);box-shadow:0 8px 40px rgba(2,6,23,0.6);transform:translateX(8px);display:none}
+    .sidebar-panel.visible{display:block}
+    .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;background:#072034;padding:10px 16px;border-radius:10px;border:1px solid rgba(255,255,255,0.04)}
+
+    .hint{color:var(--muted);font-size:13px;margin-top:8px}
+
+    footer{margin-top:18px;color:var(--muted);font-size:13px}
+
+    @media (max-width:920px){.grid{grid-template-columns:1fr;}.side{order:2}.sidebar-panel{right:10px;left:10px;width:auto}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo"><div class="mark">QR</div><h1>QuickRoom — code & fast pings</h1></div>
+      <div class="muted">Fast setup UI — share a 6-digit code</div>
+    </header>
+
+    <div class="grid">
+      <main class="card big">
+        <div id="stage">
+          <section id="generateView">
+            <h2 style="margin:0 0 8px 0">Create a room fast</h2>
+            <p class="hint">Generate a 6-digit code and share it instantly — no signup required.</p>
+            <div style="display:flex;gap:12px;align-items:center;margin-top:14px">
+              <div class="code" id="generatedCode">— — — — — —</div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div style="display:flex;gap:8px">
+                  <button id="genBtn" class="cta">Generate Code</button>
+                  <button id="copyBtn" class="ghost">Copy</button>
+                </div>
+                <div style="display:flex;gap:8px">
+                  <button id="shareBtn" class="ghost">Share Link</button>
+                  <button id="joinSelfBtn" class="ghost">Join Room</button>
+                </div>
+              </div>
+            </div>
+
+            <hr style="margin:18px 0;border:none;border-top:1px solid rgba(255,255,255,0.03)" />
+
+            <h3 style="margin:0">Quick join</h3>
+            <p class="hint">Enter a 6-digit code and pick a display name.</p>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <input id="joinCode" type="text" placeholder="Room code (e.g. 123456)" maxlength="6" />
+              <input id="joinName" type="text" placeholder="Your name" />
+              <button id="joinBtn" class="cta">Join</button>
+            </div>
+            <p class="hint">Tip: you can open this page in multiple tabs to test pings.</p>
+          </section>
+
+          <section id="roomView" style="display:none">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div class="muted">Room code</div>
+                <div class="code" id="roomCodeDisplay"></div>
+              </div>
+              <div>
+                <button id="leaveBtn" class="ghost">Leave</button>
+                <button id="copyRoomBtn" class="ghost">Copy Link</button>
+              </div>
+            </div>
+
+            <div class="board">
+              <div style="display:flex;gap:10px;align-items:center">
+                <div style="display:flex;align-items:center;gap:12px">
+                  <button id="micToggle" class="mic-btn off" aria-pressed="false" title="Toggle mic">
+                    <i class="fa fa-microphone" aria-hidden="true"></i>
+                  </button>
+                  <div class="mic-label"><span id="micLabel">Mic Off</span></div>
+                </div>
+                <button id="pingBtn" class="cta">Ping</button>
+                <button id="pingAllQuick" class="ghost">Ping Everyone</button>
+              </div>
+
+              <div>
+                <div class="muted">Participants</div>
+                <div class="participants card" id="participantsList" style="margin-top:8px;padding:10px"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <aside class="card side">
+        <h3 style="margin:0">Command board</h3>
+        <p class="hint">Quick controls for urgent coordination.</p>
+        <div style="margin-top:12px">
+          <strong>Mic</strong>
+          <div class="muted">Toggle your mic status for the room.</div>
+        </div>
+
+        <div style="margin-top:12px">
+          <strong>Ping</strong>
+          <div class="muted">Open the ping panel to target participants.</div>
+        </div>
+
+        <div style="margin-top:18px">
+          <strong>Quick tips</strong>
+          <ul style="margin:8px 0 0 16px;color:var(--muted)">
+            <li>Use big buttons — fast for rushed users</li>
+            <li>Share link to invite remotely</li>
+            <li>Open multiple tabs to test pings locally</li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+
+    <div id="pingPanel" class="sidebar-panel" aria-hidden="true">
+      <h4 style="margin:0 0 8px 0">Ping — select targets</h4>
+      <div id="pingList" style="display:flex;flex-direction:column;gap:8px;max-height:260px;overflow:auto;padding-right:6px"></div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button id="sendPingBtn" class="cta">Send Ping</button>
+        <button id="closePingBtn" class="ghost">Close</button>
+      </div>
+    </div>
+
+    <div id="toastArea"></div>
+
+    <footer class="muted">Made for quick coordination — no backend. Use share link to invite others.</footer>
+  </div>
+
+  <script>
+    // Utilities
+    const $ = id => document.getElementById(id)
+    const randCode = () => Math.floor(100000 + Math.random()*900000).toString()
+    const beep = () => { const o=new Audio(); o.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA='; o.play().catch(()=>{}); }
+
+    // State
+    let my = {id: null, name: null, code: null, mic: false}
+    const channel = new BroadcastChannel('quickroom')
+
+    function saveRoomParticipants(code, list){ localStorage.setItem('qr:room:'+code, JSON.stringify(list)) }
+    function loadRoomParticipants(code){ try { return JSON.parse(localStorage.getItem('qr:room:'+code) || '[]') } catch(e){return []} }
+
+    function renderParticipants(){
+      const list = loadRoomParticipants(my.code)
+      const container = $('participantsList')
+      container.innerHTML = ''
+      list.forEach(p=>{
+        const el = document.createElement('div'); el.className='participant'
+        el.innerHTML = `<div class="avatar">${(p.name||'?').slice(0,2).toUpperCase()}</div><div style="flex:1"><div style="font-weight:600">${escapeHtml(p.name||'Anonymous')}</div><div class="muted">${p.id===my.id? 'You' : 'Online' } • ${p.mic? 'Mic on':'Mic off'}</div></div>`
+        container.appendChild(el)
+      })
+    }
+
+    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])) }
+
+    function broadcast(msg){ channel.postMessage(msg) }
+
+    // Join/leave
+    function joinRoom(code, name){
+      my.code = code
+      my.name = name || 'Anon'
+      my.id = localStorage.getItem('qr:me:id') || crypto.randomUUID()
+      localStorage.setItem('qr:me:id', my.id)
+      const list = loadRoomParticipants(code).filter(p=>p.id!==my.id)
+      list.push({id: my.id, name: my.name, mic: my.mic, ts: Date.now()})
+      saveRoomParticipants(code, list)
+      broadcast({type:'join', room:code, participant:{id:my.id,name:my.name,mic:my.mic}})
+      $('generateView').style.display='none'
+      $('roomView').style.display='block'
+      $('roomCodeDisplay').textContent = code
+      renderParticipants()
+      pushStateParams()
+    }
+
+    function leaveRoom(){
+      if(!my.code) return
+      const list = loadRoomParticipants(my.code).filter(p=>p.id!==my.id)
+      saveRoomParticipants(my.code, list)
+      broadcast({type:'leave', room:my.code, id:my.id})
+      my = {id:null,name:null,code:null,mic:false}
+      $('generateView').style.display='block'
+      $('roomView').style.display='none'
+      history.replaceState({},'',location.pathname)
+    }
+
+    // Messages
+    channel.onmessage = ev => {
+      const m = ev.data
+      if(!m || !m.room || m.room!==my.code) return
+      if(m.type==='join' || m.type==='update'){
+        const list = loadRoomParticipants(my.code).filter(p=>p.id!==m.participant.id)
+        list.push(m.participant)
+        saveRoomParticipants(my.code, list)
+        renderParticipants()
+      } else if(m.type==='leave'){
+        const list = loadRoomParticipants(my.code).filter(p=>p.id!==m.id)
+        saveRoomParticipants(my.code, list)
+        renderParticipants()
+      } else if(m.type==='ping'){
+        if(m.targets.includes('everyone') || m.targets.includes(my.id)){
+          showToast((m.fromName||'Someone') + ' pinged you')
+          beep()
+        }
+      }
+    }
+
+    // UI helpers
+    function showToast(text, ms=2500){
+      const t = document.createElement('div'); t.className='toast'; t.textContent=text
+      document.body.appendChild(t)
+      setTimeout(()=>t.remove(), ms)
+    }
+
+    function pushStateParams(){
+      const u = new URL(location.href)
+      u.searchParams.set('code', my.code)
+      u.searchParams.set('name', my.name)
+      history.replaceState({},'',u.toString())
+    }
+
+    // Ping UI
+    function openPingPanel(){
+      const panel = $('pingPanel')
+      panel.classList.add('visible')
+      const list = loadRoomParticipants(my.code)
+      const pingList = $('pingList'); pingList.innerHTML=''
+      const everyoneRow = document.createElement('label'); everyoneRow.style.display='flex'; everyoneRow.style.alignItems='center'; everyoneRow.style.gap='8px'; everyoneRow.innerHTML = `<input type="checkbox" data-id="everyone" checked> <div style="font-weight:600">Everyone</div>`
+      pingList.appendChild(everyoneRow)
+      list.forEach(p=>{
+        const row = document.createElement('label'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px';
+        const checked = (p.id===my.id)?false:true
+        row.innerHTML = `<input type="checkbox" data-id="${p.id}" ${checked? '':'checked' }> <div style="flex:1"><div style="font-weight:600">${escapeHtml(p.name)}</div><div class="muted">${p.id===my.id? 'You' : ''}</div></div>`
+        pingList.appendChild(row)
+      })
+      panel.setAttribute('aria-hidden','false')
+    }
+
+    function closePingPanel(){ const p=$('pingPanel'); p.classList.remove('visible'); p.setAttribute('aria-hidden','true') }
+
+    function sendPing(){
+      const checks = [...$('pingList').querySelectorAll('input[type=checkbox]')]
+      const targets = checks.filter(c=>c.checked).map(c=>c.dataset.id)
+      if(targets.length===0){ showToast('Pick at least one target'); return }
+      broadcast({type:'ping',room:my.code,targets,from:my.id,fromName:my.name,ts:Date.now()})
+      showToast('Ping sent')
+      closePingPanel()
+    }
+
+    // Event wiring
+    $('genBtn').addEventListener('click', ()=>{
+      const c = randCode(); $('generatedCode').textContent = c; navigator.clipboard?.writeText(c).catch(()=>{});
+    })
+    $('copyBtn').addEventListener('click', ()=>{ const t=$('generatedCode').textContent.trim(); if(t) navigator.clipboard.writeText(t).then(()=>showToast('Code copied')) })
+    $('shareBtn').addEventListener('click', ()=>{
+      const code = $('generatedCode').textContent.trim(); if(!code){ showToast('Generate a code first'); return }
+      const shareUrl = `${location.origin}${location.pathname}?code=${code}`
+      if(navigator.share) navigator.share({title:'Join my QuickRoom',text:'Join with this code',url:shareUrl}).catch(()=>navigator.clipboard.writeText(shareUrl).then(()=>showToast('Link copied')))
+      else navigator.clipboard.writeText(shareUrl).then(()=>showToast('Link copied'))
+    })
+
+    $('joinBtn').addEventListener('click', ()=>{
+      const code = $('joinCode').value.trim(); const name = $('joinName').value.trim() || 'Anon'
+      if(!/^[0-9]{6}$/.test(code)){ showToast('Enter a valid 6-digit code'); return }
+      joinRoom(code,name)
+    })
+    $('joinSelfBtn').addEventListener('click', ()=>{
+      const code = $('generatedCode').textContent.trim(); if(!/^[0-9]{6}$/.test(code)){ showToast('Generate a code first'); return }
+      const name = prompt('Your display name','You') || 'You'
+      joinRoom(code,name)
+    })
+
+    $('leaveBtn').addEventListener('click', ()=>{ leaveRoom(); showToast('Left room') })
+    $('copyRoomBtn').addEventListener('click', ()=>{ const url = `${location.origin}${location.pathname}?code=${my.code}&name=${encodeURIComponent(my.name)}`; navigator.clipboard.writeText(url).then(()=>showToast('Room link copied')) })
+
+    $('micToggle').addEventListener('click', ()=>{
+      my.mic = !my.mic
+      const btn = $('micToggle')
+      btn.classList.toggle('off', !my.mic)
+      btn.setAttribute('aria-pressed', String(!!my.mic))
+      $('micLabel').textContent = my.mic? 'Mic On':'Mic Off'
+      broadcast({type:'update',room:my.code,participant:{id:my.id,name:my.name,mic:my.mic}})
+      const list = loadRoomParticipants(my.code).map(p=>p.id===my.id? {...p,mic:my.mic}:p)
+      saveRoomParticipants(my.code,list)
+      renderParticipants()
+    })
+    $('micToggle').addEventListener('keypress', e=>{ if(e.key==='Enter' || e.key === ' ') { e.preventDefault(); $('micToggle').click() } })
+
+    $('pingBtn').addEventListener('click', ()=>{ if(!my.code){ showToast('Join a room first'); return } openPingPanel() })
+    $('closePingBtn').addEventListener('click', closePingPanel)
+    $('sendPingBtn').addEventListener('click', sendPing)
+    $('pingAllQuick').addEventListener('click', ()=>{ if(!my.code){ showToast('Join a room first'); return } broadcast({type:'ping',room:my.code,targets:['everyone'],from:my.id,fromName:my.name||'Someone'}); showToast('Pinged everyone'); })
+
+    // On load — auto-join if params present
+    window.addEventListener('load', ()=>{
+      const u = new URL(location.href)
+      const code = u.searchParams.get('code')
+      const name = u.searchParams.get('name')
+      if(code && name && /^[0-9]{6}$/.test(code)){
+        $('generatedCode').textContent = code
+        $('joinName').value = name
+        $('joinCode').value = code
+        joinRoom(code,name)
+        showToast('Auto-joined room')
+      }
+    })
+
+    window.addEventListener('beforeunload', ()=>{ if(my.code) broadcast({type:'leave',room:my.code,id:my.id}) })
+
+  </script>
+</body>
+</html>
